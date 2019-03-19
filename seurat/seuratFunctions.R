@@ -13,6 +13,7 @@ createSeuratObj <- function(seuratData = NA, project = NA, minFeatures = 25){
   p.mito <- Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts')[mito.features, ]) / Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts'))
   seuratObj[['p.mito']] <- p.mito
   
+  
   return(seuratObj)
 }
 
@@ -70,7 +71,23 @@ mergeSeuratObjs <- function(seuratObjs, data){
   return(seuratObj)  
 }
 
-processSeurat1 <- function(seuratObj){
+processSeurat1 <- function(seuratObj, cellFilt=F,
+                               nUMI.high = 20000, nGene.high = 3000, pMito.high = 0.15,
+                               nUMI.low = 0.99, nGene.low = 200, pMito.low = -Inf){
+  
+    if(cellFilt){
+    print("Filtering Cells...")
+
+     #   seuratObj <- FilterCells(object = seuratObj,
+     #                             subset.names = c("nUMI", "nGene", "p.mito"),
+     #                             low.thresholds = c(nUMI.low,   nGene.low,     pMito.low),
+     #                             high.thresholds = c(nUMI.high, nGene.high,    pMito.high))
+    
+    seuratObj <- subset(x = seuratObj, subset = nCount_RNA > nGene.low & nCount_RNA < nGene.high)
+    seuratObj <- subset(x = seuratObj, subset = nFeature_RNA > nUMI.low & nFeature_RNA < nUMI.high)
+    seuratObj <- subset(x = seuratObj, subset = p.mito > pMito.low & p.mito < pMito.high)
+    }
+  
   if (!hasStepRun(seuratObj, 'NormalizeData')) {
     seuratObj <- NormalizeData(object = seuratObj, normalization.method = "LogNormalize")
     seuratObj <- markStepRun(seuratObj, 'NormalizeData', saveFile)
