@@ -8,7 +8,7 @@ library(DropletUtils)
 labkey.setDefaults(baseUrl = "https://prime-seq.ohsu.edu")
 
 createSeuratObj <- function(seuratData = NA, project = NA, minFeatures = 25){
-  seuratObj <- CreateSeuratObject(counts = seuratData, min.cells = 0, min.features = minFeatures, project = project)
+  seuratObj <- CreateSeuratObject(counts = seuratData, min.cells = 1, min.features = minFeatures, project = project)
   
   mito.features <- grep(pattern = "^MT-", x = rownames(x = seuratObj), value = TRUE)
   p.mito <- Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts')[mito.features, ]) / Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts'))
@@ -253,11 +253,17 @@ removeCellCycle <- function(seuratObj) {
   
   print("Running PCA with cell cycle genes")
   seuratObj <- RunPCA(object = seuratObj, pc.genes = c(s.genes, g2m.genes), do.print = FALSE)
-  print(PCAPlot(seuratObj))
-  
+  #print(PCAPlot(seuratObj))
+  print(DimPlot(object = seuratObj, reduction = "pca"))
+
   #store values to append later
-  SeuratObjsCCPCA <- as.data.frame(SeuratObj@dr$pca@cell.embeddings)
+  #SeuratObjsCCPCA <- as.data.frame(SeuratObj@dr$pca@cell.embeddings)
+  
+  SeuratObjsCCPCA <- as.data.frame(seuratObj@reductions$pca@cell.embeddings)
+  
   colnames(SeuratObjsCCPCA) <- paste(colnames(SeuratObjsCCPCA), "CellCycle", sep="_")
+  
+  ## This fails. The solution seems to be to set the min.cell=1 instead of 0 but is that temporary until they fix this?
   
   seuratObj <- CellCycleScoring(object = seuratObj, 
                                 s.genes = s.genes, 
