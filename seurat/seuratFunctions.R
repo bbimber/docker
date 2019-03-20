@@ -229,6 +229,61 @@ processAndAggregateTcrClonotypes <- function(clonotypeFile){
   
   return(tcr)
 }
+                           
+                           
+CellCycleScoring_SERIII <- function (object, s.features, g2m.features, set.ident = FALSE)
+{
+  name <- "Cell Cycle"
+  features <- list(S.Score = s.features, G2M.Score = g2m.features)
+
+  StartNBin = 24
+  object.cc = NA
+
+  while(class(object.cc)=="try-error" || is.na(object.cc[1])){
+
+    object.cc <- try(AddModuleScore(object = seuratObj, features = features, nbin = StartNBin,
+                                    name = name,
+                                    ctrl = min(vapply(X = features, FUN = length,
+                                                      FUN.VALUE = numeric(length = 1)))))
+    StartNBin = round(StartNBin/2)
+
+  }; print(StartNBin)
+
+
+  cc.columns <- grep(pattern = name, x = colnames(x = object.cc[[]]),
+                     value = TRUE)
+  cc.scores <- object.cc[[cc.columns]]
+  rm(object.cc)
+  gc(verbose = FALSE)
+
+  assignments <- apply(X = cc.scores, MARGIN = 1, FUN = function(scores,
+                                                                 first = "S", second = "G2M", null = "G1") {
+    if (all(scores < 0)) {
+      return(null)
+    }
+    else {
+      if (length(which(x = scores == max(scores))) > 1) {
+        return("Undecided")
+      }
+      else {
+        return(c(first, second)[which(x = scores == max(scores))])
+      }
+    }
+  })
+  cc.scores <- merge(x = cc.scores, y = data.frame(assignments),
+                     by = 0)
+  colnames(x = cc.scores) <- c("rownames", "S.Score", "G2M.Score",
+                               "Phase")
+  rownames(x = cc.scores) <- cc.scores$rownames
+  cc.scores <- cc.scores[, c("S.Score", "G2M.Score", "Phase")]
+  object[[colnames(x = cc.scores)]] <- cc.scores
+
+  if (set.ident) {
+    object[["old.ident"]] <- Idents(object = object)
+    Idents(object = object) <- "Phase"
+  }
+  return(object)
+}
 
 removeCellCycle <- function(seuratObj) {
   print("Performing cell cycle cleaning ...")
@@ -253,19 +308,21 @@ removeCellCycle <- function(seuratObj) {
   
   print("Running PCA with cell cycle genes")
   seuratObj <- RunPCA(object = seuratObj, pc.genes = c(s.genes, g2m.genes), do.print = FALSE)
-  print(PCAPlot(seuratObj))
+  print(DimPlot(object = seuratObj, reduction = "pca"))
+
   
   #store values to append later
   SeuratObjsCCPCA <- as.data.frame(SeuratObj@dr$pca@cell.embeddings)
   colnames(SeuratObjsCCPCA) <- paste(colnames(SeuratObjsCCPCA), "CellCycle", sep="_")
   
-  seuratObj <- CellCycleScoring(object = seuratObj, 
+  seuratObj <- CellCycleScoring_SERIII(object = seuratObj, 
                                 s.genes = s.genes, 
                                 g2m.genes = g2m.genes, 
                                 set.ident = TRUE)
   
   
-  print(PCAPlot(object = SeuratObjs, dim.1 = 1, dim.2 = 2))
+    print(DimPlot(object = seuratObj, reduction = "pca"))
+
   
   print("Regressing out S and G2M score ...")
   seuratObj <- ScaleData(object = seuratObj, vars.to.regress = c("S.Score", "G2M.Score"), display.progress = T)
