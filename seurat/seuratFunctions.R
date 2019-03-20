@@ -279,7 +279,7 @@ removeCellCycle <- function(seuratObj) {
   seuratObj <- RunPCA(object = seuratObj, pc.genes = VariableFeatures(object = seuratObj), do.print = F)
   
   for (colName in colnames(SeuratObjsCCPCA)) {
-    seuratObj[colName] <- SeuratObjsCCPCA[rownames(seuratObj)]  
+    seuratObj[[colName]] <- SeuratObjsCCPCA[colnames(seuratObj),colName]
   }
   
   return(seuratObj)
