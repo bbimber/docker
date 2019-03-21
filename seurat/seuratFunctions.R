@@ -405,14 +405,14 @@ createExampleData <- function(nRow = 100, nCol = 10){
   return(tmpdir)
 }
 
-findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
-  
+findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F, min.y=NA, min.x=NA) {
+
   # minor modification to debug specic scenarios when fail to find elbow
   # The following helper functions were found at
   # paulbourke.net/geometry/pointlineplane/pointline.r
   # via the SO reference below.  The short segment check
   # was modified to permit vectorization.
-  
+
   ##========================================================
   ##
   ##  Credits:
@@ -430,7 +430,7 @@ findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
   #' 	plot = TRUE) # late rise
   #' tmp <- findElbow(c(2, 4, 6, 8, 10, 12, 14, 16)^2,
   #' 	plot = TRUE) # gradual, no obvious break
-  #' 
+  #'
   #' # Not the usual way to choose the number of PCs:
   #' library("chemometrics")
   #' data(glass)
@@ -441,7 +441,7 @@ findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
   #' tmp <- findElbow(vv, plot = TRUE)
   #' tmp <- findElbow(cs, plot = TRUE)
   #'
-  
+
   distancePointLine <- function(x, y, slope, intercept) {
     ## x, y is the point to test.
     ## slope, intercept is the line to check distance.
@@ -455,7 +455,7 @@ findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
     y2 <- x2*slope+intercept
     distancePointSegment(x,y, x1,y1, x2,y2)
   }
-  
+
   distancePointSegment <- function(px, py, x1, y1, x2, y2) {
     ## px,py is the point to test.
     ## x1,y1,x2,y2 is the line to check distance.
@@ -491,52 +491,71 @@ findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
     }
     ans
   }
-  
+
   # End of helper functions by PB
-  
+
   ### Now for the actual findElbow function!
-  
+
   # Find the elbow using the method described in
   # stackoverflow.com/a/2022348/633251
   # but translated to R (see above).
-  
+
+
+  y <- sort(y, decreasing = T)
+
   # Add an index to argument values for easy plotting
   DF <- data.frame(x = 1:length(y), y = y)
   fit <- lm(y ~ x, DF[c(1,nrow(DF)),]) # 2 point 'fit'
   m <- coef(fit)[2]
   b <- coef(fit)[1]
-  
+
   # Check to make sure the data is concave as described
   # in the documentation, as arbitrary trends could give
   # misleading answers.  The following approach simply
   # checks to make sure all values are either above or
   # below the reference line.  This allows the values
   # to vary quite a bit and still return an answer.
-  
+
   concave <- FALSE
   use <- 2:(nrow(DF)-1)
   refpts <- m*DF$x[use] + b
   if (all(refpts > DF$y[use]) | all(refpts < DF$y[use])) concave <- TRUE
   if(ignore.concavity) concave <- TRUE
   if (!concave) stop("Your curve doesn't appear to be concave")
-  
+
   # Calculate the orthogonal distances
-  use <- 2:(nrow(DF)-1)
-  elbowd <- distancePointLine(DF$x[use], DF$y[use], coef(fit)[2], coef(fit)[1])
-  DF$dist <- c(NA, elbowd, NA) # first & last points don't have a distance
-  
+
+  if(is.na(min.x)){
+    if(!is.na(min.y)){
+      if(!length(which(DF$y<=min.y))<1){
+        min.x = min(DF[which(DF$y<=min.y), ]$x)
+      } else {
+        print("min.y greater than smallest y")
+        min.x = 2
+      }
+    } else {
+      print("min.x and min.y are NA")
+      min.x = 2
+    }
+
+  }
+
+  use     <- min.x:(nrow(DF)-1)
+  elbowd  <- distancePointLine(DF$x[use], DF$y[use], coef(fit)[2], coef(fit)[1])
+  DF$dist <- rep(NA, nrow(DF))
+  DF$dist[use]  <- elbowd # c(NA, elbowd, NA) # first & last points don't have a distance
+
   if (plot) {
     edm <- which.max(DF$dist)
     plot(DF[,1:2], type = "b", xlab = "index", ylab = "y values",
          main = "Looking for the Elbow")
     segments(DF$x[1], DF$y[1],
              DF$x[nrow(DF)], DF$y[nrow(DF)], col = "red")
-    points(DF$x[edm], DF$y[edm], cex = 1.5, col = "red")	
+    points(DF$x[edm], DF$y[edm], cex = 1.5, col = "red")
     points(DF$x[edm], DF$y[edm], pch = 20)
   }
-  
-  if (returnIndex) return(which.max(DF$dist))
-  if (!returnIndex) return(DF)
-  
+
+  if (returnIndex) return(which.max(DF$dist)) else return(DF)
+
 } # end of findElbow                           
                            
