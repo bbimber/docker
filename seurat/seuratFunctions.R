@@ -404,3 +404,139 @@ createExampleData <- function(nRow = 100, nCol = 10){
                  gene.symbol=gene.symb, barcodes=cell.ids)
   return(tmpdir)
 }
+
+findElbow <- function(y, plot = FALSE, returnIndex = TRUE, ignore.concavity=F) {
+  
+  # minor modification to debug specic scenarios when fail to find elbow
+  # The following helper functions were found at
+  # paulbourke.net/geometry/pointlineplane/pointline.r
+  # via the SO reference below.  The short segment check
+  # was modified to permit vectorization.
+  
+  ##========================================================
+  ##
+  ##  Credits:
+  ##  Theory by Paul Bourke http://local.wasp.uwa.edu.au/~pbourke/geometry/pointline/
+  ##  Based in part on C code by Damian Coventry Tuesday, 16 July 2002
+  ##  Based on VBA code by Brandon Crosby 9-6-05 (2 dimensions)
+  ##  With grateful thanks for answering our needs!
+  ##  This is an R (http://www.r-project.org) implementation by Gregoire Thomas 7/11/08
+  ##
+  ##========================================================
+  #' @examples
+  #' tmp <- findElbow(c(0.9, 1.1, 1.1, 1.9, 2.5, 2.8, 4.9, 8.5),
+  #' 	plot = TRUE) # wandering
+  #' tmp <- findElbow(c(0.9, 1.0, 1.2, 1.3, 1.5, 1.5, 10.0, 22.0),
+  #' 	plot = TRUE) # late rise
+  #' tmp <- findElbow(c(2, 4, 6, 8, 10, 12, 14, 16)^2,
+  #' 	plot = TRUE) # gradual, no obvious break
+  #' 
+  #' # Not the usual way to choose the number of PCs:
+  #' library("chemometrics")
+  #' data(glass)
+  #' pca <- prcomp(glass)
+  #' eigensum <- sum(pca$sdev * pca$sdev)
+  #' vv <- 100 * (pca$sdev * pca$sdev/eigensum)
+  #' cs <- cumsum(vv)
+  #' tmp <- findElbow(vv, plot = TRUE)
+  #' tmp <- findElbow(cs, plot = TRUE)
+  #'
+  
+  distancePointLine <- function(x, y, slope, intercept) {
+    ## x, y is the point to test.
+    ## slope, intercept is the line to check distance.
+    ##
+    ## Returns distance from the line.
+    ##
+    ## Returns 9999 on 0 denominator conditions.
+    x1 <- x-10
+    x2 <- x+10
+    y1 <- x1*slope+intercept
+    y2 <- x2*slope+intercept
+    distancePointSegment(x,y, x1,y1, x2,y2)
+  }
+  
+  distancePointSegment <- function(px, py, x1, y1, x2, y2) {
+    ## px,py is the point to test.
+    ## x1,y1,x2,y2 is the line to check distance.
+    ##
+    ## Returns distance from the line, or if the intersecting point on the line nearest
+    ## the point tested is outside the endpoints of the line, the distance to the
+    ## nearest endpoint.
+    ##
+    ## Returns 9999 on 0 denominator conditions.
+    lineMagnitude <- function(x1, y1, x2, y2) sqrt((x2-x1)^2+(y2-y1)^2)
+    ans <- NULL
+    ix <- iy <- 0   # intersecting point
+    lineMag <- lineMagnitude(x1, y1, x2, y2)
+    if(any(lineMag < 0.00000001)) { # modified for vectorization by BAH
+      #warning("short segment")
+      #return(9999)
+      warning("At least one line segment given by x1, y1, x2, y2 is very short.")
+    }
+    u <- (((px - x1) * (x2 - x1)) + ((py - y1) * (y2 - y1)))
+    u <- u / (lineMag * lineMag)
+    if(any((u < 0.00001) || (u > 1))) { # BAH added any to vectorize
+      ## closest point does not fall within the line segment, take the shorter distance
+      ## to an endpoint
+      ix <- lineMagnitude(px, py, x1, y1)
+      iy <- lineMagnitude(px, py, x2, y2)
+      if(ix > iy)  ans <- iy
+      else ans <- ix
+    } else {
+      ## Intersecting point is on the line, use the formula
+      ix <- x1 + u * (x2 - x1)
+      iy <- y1 + u * (y2 - y1)
+      ans <- lineMagnitude(px, py, ix, iy)
+    }
+    ans
+  }
+  
+  # End of helper functions by PB
+  
+  ### Now for the actual findElbow function!
+  
+  # Find the elbow using the method described in
+  # stackoverflow.com/a/2022348/633251
+  # but translated to R (see above).
+  
+  # Add an index to argument values for easy plotting
+  DF <- data.frame(x = 1:length(y), y = y)
+  fit <- lm(y ~ x, DF[c(1,nrow(DF)),]) # 2 point 'fit'
+  m <- coef(fit)[2]
+  b <- coef(fit)[1]
+  
+  # Check to make sure the data is concave as described
+  # in the documentation, as arbitrary trends could give
+  # misleading answers.  The following approach simply
+  # checks to make sure all values are either above or
+  # below the reference line.  This allows the values
+  # to vary quite a bit and still return an answer.
+  
+  concave <- FALSE
+  use <- 2:(nrow(DF)-1)
+  refpts <- m*DF$x[use] + b
+  if (all(refpts > DF$y[use]) | all(refpts < DF$y[use])) concave <- TRUE
+  if(ignore.concavity) concave <- TRUE
+  if (!concave) stop("Your curve doesn't appear to be concave")
+  
+  # Calculate the orthogonal distances
+  use <- 2:(nrow(DF)-1)
+  elbowd <- distancePointLine(DF$x[use], DF$y[use], coef(fit)[2], coef(fit)[1])
+  DF$dist <- c(NA, elbowd, NA) # first & last points don't have a distance
+  
+  if (plot) {
+    edm <- which.max(DF$dist)
+    plot(DF[,1:2], type = "b", xlab = "index", ylab = "y values",
+         main = "Looking for the Elbow")
+    segments(DF$x[1], DF$y[1],
+             DF$x[nrow(DF)], DF$y[nrow(DF)], col = "red")
+    points(DF$x[edm], DF$y[edm], cex = 1.5, col = "red")	
+    points(DF$x[edm], DF$y[edm], pch = 20)
+  }
+  
+  if (returnIndex) return(which.max(DF$dist))
+  if (!returnIndex) return(DF)
+  
+} # end of findElbow                           
+                           
