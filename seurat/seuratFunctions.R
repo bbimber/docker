@@ -336,6 +336,8 @@ findClustersAndRunTSNE <- function(seuratObj, dimsToUse) {
   
   print(CombinePlots(plots = list(plot1, plot2, plot3, plot4, plot5), legend = 'none'))
   
+  return(seuratObj)
+  
 }
 
 findMarkers <- function(seuratObj, resolutionToUse, saveFileMarkers = NULL) {
