@@ -7,8 +7,18 @@ library(DropletUtils)
 
 labkey.setDefaults(baseUrl = "https://prime-seq.ohsu.edu")
 
-createSeuratObj <- function(seuratData = NA, project = NA, minFeatures = 25){
-  seuratObj <- CreateSeuratObject(counts = seuratData, min.cells = 0, min.features = minFeatures, project = project)
+readAndFilter10xData <- function(dataDir, datasetName) {
+  seuratRawData <- Read10X(data.dir = dataDir)
+  seuratRawData <- performEmptyDropletFiltering(seuratRawData)
+  
+  seuratObj <- createSeuratObj(seuratRawData, project = datasetName)
+  printQcPlots1(seuratObj)
+
+  return(seuratObj)  
+}
+
+createSeuratObj <- function(seuratData = NA, project = NA, minFeatures = 25, minCells = 0){
+  seuratObj <- CreateSeuratObject(counts = seuratData, min.cells = minCells, min.features = minFeatures, project = project)
   
   mito.features <- grep(pattern = "^MT-", x = rownames(x = seuratObj), value = TRUE)
   p.mito <- Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts')[mito.features, ]) / Matrix::colSums(x = GetAssayData(object = seuratObj, slot = 'counts'))
@@ -47,12 +57,16 @@ performEmptyDropletFiltering <- function(seuratRawData, fdrThreshold=0.01) {
          legend=c("knee", "inflection"))
   
   e.out <- emptyDrops(seuratRawData)
+  print(paste0('Input cells: ', nrow(e.out)))
+  e.out <- e.out[!is.na(e.out$LogProb),]
   e.out$is.cell <- e.out$FDR <= fdrThreshold
   print(paste0('Passing cells: ', sum(e.out$is.cell, na.rm=TRUE)))
   print(paste0('Failing cells: ', sum(!e.out$is.cell, na.rm=TRUE)))
+  
+  #If there are any entries with FDR above the desired threshold and Limited==TRUE, it indicates that npts should be increased in the emptyDrops call.
   print(table(Limited=e.out$Limited, Significant=e.out$is.cell))
   
-  toPlot <- e.out[e.out$LogProb != -Inf,]
+  toPlot <- e.out[is.finite(e.out$LogProb),]
   if (nrow(toPlot) > 0) {
     print(plot(toPlot$Total, -toPlot$LogProb, col=ifelse(toPlot$is.cell, "red", "black"), xlab="Total UMI count", ylab="-Log Probability"))
   } else {
@@ -77,10 +91,12 @@ markStepRun <- function(seuratObj, name, saveFile = NULL) {
 }
 
 mergeSeuratObjs <- function(seuratObjs, data){
+  seuratObj <- NULL
   for (exptNum in names(data)) {
     print(paste0('adding expt: ', exptNum))
-    seuratObjs[[exptNum]] <- RenameCells(object = seuratObjs[[exptNum]], add.cell.id = exptNum)
-    seuratObjs[[exptNum]]
+    prefix <- paste0(exptNum)
+    seuratObjs[[exptNum]] <- RenameCells(object = seuratObjs[[exptNum]], add.cell.id = prefix)
+    seuratObjs[[exptNum]][['BarcodePrefix']] <- c(prefix)
     
     if (is.null(seuratObj)) {
       seuratObj <- seuratObjs[[exptNum]]
@@ -100,7 +116,22 @@ mergeSeuratObjs <- function(seuratObjs, data){
   return(seuratObj)  
 }
 
-processSeurat1 <- function(seuratObj, saveFile = NULL, doCellCycle = T){
+processSeurat1 <- function(seuratObj, saveFile = NULL, doCellCycle = T, doCellFilter = F,
+                           nUMI.high = 20000, nGene.high = 3000, pMito.high = 0.15,
+                           nUMI.low = 0.99, nGene.low = 200, pMito.low = -Inf){
+  
+  if(doCellFilter & !hasStepRun(seuratObj, 'FilterCells')) {
+    print("Filtering Cells...")
+    seuratObj@misc$OriginalCells <- length(colnames(x = seuratObj))
+    seuratObj <- subset(x = seuratObj, subset = nCount_RNA > nGene.low & nCount_RNA < nGene.high)
+    seuratObj <- subset(x = seuratObj, subset = nFeature_RNA > nUMI.low & nFeature_RNA < nUMI.high)
+    seuratObj <- subset(x = seuratObj, subset = p.mito > pMito.low & p.mito < pMito.high)
+    
+    print(paste0('Initial cells: ', seuratObj@misc$OriginalCells, ', after filter: ', length(colnames(x = seuratObj))))
+    
+    seuratObj <- markStepRun(seuratObj, 'FilterCells')
+  }
+  
   if (!hasStepRun(seuratObj, 'NormalizeData')) {
     seuratObj <- NormalizeData(object = seuratObj, normalization.method = "LogNormalize")
     seuratObj <- markStepRun(seuratObj, 'NormalizeData', saveFile)
@@ -140,6 +171,17 @@ processSeurat1 <- function(seuratObj, saveFile = NULL, doCellCycle = T){
     seuratObj <- ScoreJackStraw(object = seuratObj, dims = 1:20)
     seuratObj <- markStepRun(seuratObj, 'ScoreJackStraw')
   }
+  
+  print(paste0('Variable genes: ', length(x = VariableFeatures(object = seuratObj))))
+  
+  print(VizDimLoadings(object = seuratObj, dims = 1:2))
+  print(DimPlot(object = seuratObj))
+  
+  print(DimHeatmap(object = seuratObj, dims = 1, cells = 500, balanced = TRUE))
+  print(DimHeatmap(object = seuratObj, dims = 1:20, cells = 500, balanced = TRUE))
+  
+  print(JackStrawPlot(object = seuratObj, dims = 1:20))
+  print(ElbowPlot(object = seuratObj))
   
   return(seuratObj)
 }
@@ -229,10 +271,8 @@ processAndAggregateTcrClonotypes <- function(clonotypeFile){
   
   return(tcr)
 }
-                           
-                           
-CellCycleScoring_SERIII <- function (object, s.features, g2m.features, set.ident = FALSE)
-{
+                                                      
+cellCycleScoringSERIII <- function (object, s.features, g2m.features, set.ident = FALSE) {
   name <- "Cell Cycle"
   features <- list(S.Score = s.features, G2M.Score = g2m.features)
 
@@ -296,7 +336,7 @@ removeCellCycle <- function(seuratObj) {
   }
   
   con <- url("https://raw.githubusercontent.com/bbimber/rnaseq/master/data/cellCycle/G2M.txt")
-  g2m.genes <- readLines(con =  con)
+  g2m.genes <- readLines(con =  con, warn = F)
   close(con)
   
   # We can segregate this list into markers of G2/M phase and markers of S-phase
@@ -309,20 +349,17 @@ removeCellCycle <- function(seuratObj) {
   print("Running PCA with cell cycle genes")
   seuratObj <- RunPCA(object = seuratObj, pc.genes = c(s.genes, g2m.genes), do.print = FALSE)
   print(DimPlot(object = seuratObj, reduction = "pca"))
-
   
   #store values to append later
-  SeuratObjsCCPCA <- as.data.frame(SeuratObj@dr$pca@cell.embeddings)
+  SeuratObjsCCPCA <- as.data.frame(seuratObj@reductions$pca@cell.embeddings)
   colnames(SeuratObjsCCPCA) <- paste(colnames(SeuratObjsCCPCA), "CellCycle", sep="_")
   
-  seuratObj <- CellCycleScoring_SERIII(object = seuratObj, 
-                                s.genes = s.genes, 
-                                g2m.genes = g2m.genes, 
+  seuratObj <- CellCycleScoring(object = seuratObj, 
+                                s.features = s.genes, 
+                                g2m.features = g2m.genes, 
                                 set.ident = TRUE)
   
-  
-    print(DimPlot(object = seuratObj, reduction = "pca"))
-
+  print(DimPlot(object = seuratObj, reduction = "pca"))
   
   print("Regressing out S and G2M score ...")
   seuratObj <- ScaleData(object = seuratObj, vars.to.regress = c("S.Score", "G2M.Score"), display.progress = T)
@@ -331,8 +368,75 @@ removeCellCycle <- function(seuratObj) {
   seuratObj <- RunPCA(object = seuratObj, pc.genes = VariableFeatures(object = seuratObj), do.print = F)
   
   for (colName in colnames(SeuratObjsCCPCA)) {
-    seuratObj[colName] <- SeuratObjsCCPCA[rownames(seuratObj)]  
+    seuratObj[[colName]] <- SeuratObjsCCPCA[colnames(seuratObj),colName]  
   }
   
   return(seuratObj)
+}
+
+findClustersAndDimRedux <- function(seuratObj, dimsToUse, saveFile = NULL) {
+  if (!hasStepRun(seuratObj, 'FindNeighbors')) {
+    seuratObj <- FindNeighbors(object = seuratObj, dims = dimsToUse)
+    seuratObj <- markStepRun(seuratObj, 'FindNeighbors')
+  }
+  
+  if (!hasStepRun(seuratObj, 'FindClusters')) {
+    for (resolution in c(0.2, 0.4, 0.8, 1.2, 0.6)){
+      seuratObj <- FindClusters(object = seuratObj, resolution = resolution)
+      seuratObj[[paste0("ClusterNames_", resolution)]] <- Idents(object = seuratObj)
+      seuratObj <- markStepRun(seuratObj, 'FindClusters', saveFile)
+    }
+  }
+  
+  if (!hasStepRun(seuratObj, 'RunTSNE')) {
+    #See: https://github.com/satijalab/seurat/issues/167
+    seuratObj <- RunTSNE(object = seuratObj, dims.use = dimsToUse, check_duplicates = FALSE)
+    seuratObj <- markStepRun(seuratObj, 'RunTSNE', saveFile)
+  }
+  
+  plot1 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.2", label = TRUE) + ggtitle('Resolution: 0.2')
+  plot2 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.4", label = TRUE) + ggtitle('Resolution: 0.4')
+  plot3 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.6", label = TRUE) + ggtitle('Resolution: 0.6')
+  plot4 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.8", label = TRUE) + ggtitle('Resolution: 0.8')
+  plot5 <- DimPlot(object = seuratObj, group.by = "ClusterNames_1.2", label = TRUE) + ggtitle('Resolution: 1.2')
+  
+  print(CombinePlots(plots = list(plot1, plot2, plot3, plot4, plot5), legend = 'none'))
+  
+  #this worked for me.
+  if (!hasStepRun(seuratObj, 'RunUMAP')) {
+    seuratObj <- RunUMAP(seuratObj,
+                         dims = dimsToUse,
+                         n.neighbors = 40L,
+                         min.dist = 0.2,
+                         metric = "correlation",
+                         seed.use = 1234)
+    seuratObj <- markStepRun(seuratObj, 'RunUMAP', saveFile)
+  }
+  
+  print(DimPlot(object = seuratObj, reduction = "umap") + ggtitle('UMAP'))
+  
+  return(seuratObj)
+}
+
+findMarkers <- function(seuratObj, resolutionToUse, outFile, saveFileMarkers = NULL) {
+  Idents(seuratObj) <- seuratObj[[paste0('ClusterNames_',resolutionToUse)]]
+  
+  if (file.exists(saveFileMarkers)) {
+    print('resuming from file')
+    seuratObj.markers <- readRDS(saveFileMarkers)
+  } else {
+    seuratObj.markers <- FindAllMarkers(object = seuratObj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+    saveRDS(seuratObj.markers, file = saveFileMarkers)
+  }
+  
+  toPlot <- seuratObj.markers %>% filter(p_val_adj < 0.001) %>% group_by(cluster)  %>% filter(avg_logFC > 0.5) %>% top_n(9, avg_logFC) %>% select(gene)
+  
+  write.table(toPlot, file = outFile, sep = '\t', row.names = F, quote = F)
+  
+  print(DimPlot(object = seuratObj, reduction = 'tsne'))
+  
+  top10 <- seuratObj.markers %>% group_by(cluster) %>% top_n(10, avg_logFC)
+  print(DoHeatmap(object = seuratObj, features = top10$gene))
+  
+  return(toPlot)
 }
