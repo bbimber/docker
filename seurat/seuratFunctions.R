@@ -404,3 +404,33 @@ createExampleData <- function(nRow = 100, nCol = 10){
                  gene.symbol=gene.symb, barcodes=cell.ids)
   return(tmpdir)
 }
+
+                           
+#In the package I call it ElbowPlot_SERIII                            
+ElbowPlot <- function (object, ndims = 25, reduction = "pca", print.plot = T, return.elbow = T)
+{
+  #object = SeuratObjs; ndims = 25; reduction = "pca"
+  data.use <- Stdev(object = object, reduction = reduction)
+
+  if (length(data.use) == 0) {
+    stop(paste("No standard deviation info stored for", reduction))
+  }
+  if (ndims > length(x = data.use)) {
+    warning("The object only has information for ", length(x = data.use),
+            " reductions")
+    ndims <- length(x = data.use)
+  }
+
+  #1 sd = 1.3
+  elbowX <- findElbow(data.use[1:ndims], plot = F, returnIndex = TRUE, ignore.concavity=F, min.y = 1.3)
+
+  stdev <- "Standard Deviation"
+
+  plot <- ggplot(data = data.frame(dims = 1:ndims, stdev = data.use[1:ndims])) +
+    geom_point(mapping = aes_string(x = "dims", y = "stdev")) +
+    labs(x = gsub(pattern = "_$", replacement = "", x = Key(object = object[[reduction]])),
+         y = stdev) +theme_bw() + geom_vline(xintercept = elbowX) + ggtitle("Elbow Identification")
+
+ if(print.plot) print(plot)
+ if(return.elbow) return(elbowX) else return(plot)
+}
