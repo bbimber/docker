@@ -354,7 +354,7 @@ removeCellCycle <- function(seuratObj) {
   SeuratObjsCCPCA <- as.data.frame(seuratObj@reductions$pca@cell.embeddings)
   colnames(SeuratObjsCCPCA) <- paste(colnames(SeuratObjsCCPCA), "CellCycle", sep="_")
   
-  seuratObj <- CellCycleScoring(object = seuratObj, 
+  seuratObj <- cellCycleScoringSERIII(object = seuratObj, 
                                 s.features = s.genes, 
                                 g2m.features = g2m.genes, 
                                 set.ident = TRUE)
