@@ -314,7 +314,10 @@ removeCellCycle <- function(seuratObj) {
   return(seuratObj)
 }
 
-findClustersAndRunTSNE <- function(seuratObj, dimsToUse) {
+findClustersAndDimRedux <- function(seuratObj, dimsToUse) {
+  #Since I put UMAP here as well. Although PCA is not here which is technically a DimRedux.
+  
+  
   if (!hasStepRun(seuratObj, 'FindClusters')) {
     for (resolution in c(0.2, 0.4, 0.8, 1.2, 0.6)){
       seuratObj <- FindClusters(object = seuratObj, resolution = resolution)
@@ -328,13 +331,32 @@ findClustersAndRunTSNE <- function(seuratObj, dimsToUse) {
     seuratObj <- markStepRun(seuratObj, 'RunTSNE')
   }
   
+  #this worked for me.
+  if (!hasStepRun(seuratObj, 'RunUMAP')) {
+    seuratObj <- RunUMAP(seuratObj,
+                               dims = dimsToUse,
+                               n.neighbors = 40L,
+                               min.dist = 0.2,
+                               metric = "correlation",
+                               seed.use = 1234)
+    seuratObj <- markStepRun(seuratObj, 'RunUMAP')
+  }
+  
+  
+        
+  
+  
   plot1 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.2", label = TRUE) + ggtitle('Resolution: 0.2')
   plot2 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.4", label = TRUE) + ggtitle('Resolution: 0.4')
   plot3 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.6", label = TRUE) + ggtitle('Resolution: 0.6')
   plot4 <- DimPlot(object = seuratObj, group.by = "ClusterNames_0.8", label = TRUE) + ggtitle('Resolution: 0.8')
   plot5 <- DimPlot(object = seuratObj, group.by = "ClusterNames_1.2", label = TRUE) + ggtitle('Resolution: 1.2')
   
+
+  
   print(CombinePlots(plots = list(plot1, plot2, plot3, plot4, plot5), legend = 'none'))
+
+
   
 }
 
