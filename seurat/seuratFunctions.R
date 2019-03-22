@@ -445,6 +445,25 @@ createExampleData <- function(nRow = 100, nCol = 10){
   return(tmpdir)
 }
                            
+LengthCheck_SERII <- function(values, cutoff = 0) {
+  #Seurat v2 fx
+  # Check the length of components of a list
+  #
+  # @param values A list whose components should be checked
+  # @param cutoff A minimum value to check for
+  #
+  # @return a vector of logicals
+  #
+  return(vapply(
+    X = values,
+    FUN = function(x) {
+      return(length(x = x) > cutoff)
+    },
+    FUN.VALUE = logical(1)
+  ))
+}
+
+                           
 CellCycleScoring_SERIII <- function (object, s.features, g2m.features, set.ident = FALSE) {
   enrich.name <- 'Cell Cycle'
   genes.list <- list('S.Score' = s.features, 'G2M.Score' = g2m.features)
@@ -520,10 +539,10 @@ AddModuleScore_SERIII <- function(
     )
     cluster.length <- length(x = genes.list)
   }
-  if (!all(Seurat:::LengthCheck(values = genes.list))) {
+  if (!all(LengthCheck_SERII(values = genes.list))) {
     warning(paste(
       'Could not find enough genes in the object from the following gene lists:',
-      paste(names(x = which(x = ! Seurat:::LengthCheck(values = genes.list)))),
+      paste(names(x = which(x = ! LengthCheck_SERII(values = genes.list)))),
       'Attempting to match case...'
     ))
     genes.list <- lapply(
@@ -531,10 +550,10 @@ AddModuleScore_SERIII <- function(
       FUN = CaseMatch, match = rownames(x = object@data)
     )
   }
-  if (!all(Seurat:::LengthCheck(values = genes.list))) {
+  if (!all(LengthCheck_SERII(values = genes.list))) {
     stop(paste(
       'The following gene lists do not have enough genes present in the object:',
-      paste(names(x = which(x = ! Seurat:::LengthCheck(values = genes.list)))),
+      paste(names(x = which(x = ! LengthCheck_SERII(values = genes.list)))),
       'exiting...'
     ))
   }
