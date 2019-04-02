@@ -1,3 +1,18 @@
+#Libraries specific to creation of training models and inference with them:
+
+library(caret)
+library(C50) #install.packages("C50")
+library(kernlab)
+library(mlbench)
+library(randomForest)
+library(caretEnsemble) #install.packages("caretEnsemble")
+library(MASS)
+library(klaR) #install.packages("klaR")
+library(nnet)
+library(ggplot2)
+library(lattice)
+
+
 SaveDimRedux_SERIII <- function(seuratObj, reductions=c("pca", "tsne", "umap"),
                                 save.path=NA, maxPCAcomps=10, nameID=""){
 
@@ -177,6 +192,7 @@ AddModuleScore_SERIII <- function(
 ClassifyCellsCustom_SERIII <- function(Classifier.rds.path = "",
                                        ClassifierNames="",
                                        testing.data, log10T=T, returnTraining=F){
+  require(carot)
 
   if(!file.exists(Classifier.rds.path)){
     stop("Check classifier path ....")
