@@ -1,55 +1,3 @@
-SaveDimRedux_SERIII <- function(seuratObj, reductions=c("pca", "tsne", "umap"),
-                                save.path=NA, maxPCAcomps=10, nameID=""){
-
-  if(is.na(save.path)){
-    stop("save.path is NA")
-  }
-
-    require(data.table)
-
-    tempDT <- data.table(cbind(1:ncol(serObj), colnames(serObj)))
-    rownames(tempDT) <- colnames(serObj)
-    colnames(tempDT) <- c("nID", "cID")
-
-    tempDT <- merge(tempDT, )
-
-    if("tsne" %in% reductions) {
-      if(is.null(serObj@reductions$tsne)) print("tsne slot NULL") else {
-
-      }
-      tsneDT <- data.table(serObj@reductions$tsne@cell.embeddings)
-      tsneDT$cID <- rownames(serObj@reductions$tsne@cell.embeddings)
-      tempDT <- merge(tempDT, tsneDT, by="cID")
-    }
-    if("pca" %in% reductions) {
-      if(is.null(serObj@reductions$pca)) print("pca slot NULL") else {
-        pcaDT <- data.table(serObj@reductions$pca@cell.embeddings[,1:maxPCAcomps])
-        pcaDT$cID <- rownames(serObj@reductions$pca@cell.embeddings)
-        tempDT <- merge(tempDT, pcaDT, by="cID")
-      }
-
-    }
-    if("umap" %in% reductions) {
-      if(is.null(serObj@reductions$umap)) print("umap slot NULL") else {
-        umapDT <- data.table(serObj@reductions$umap@cell.embeddings)
-        umapDT$cID <- rownames(serObj@reductions$umap@cell.embeddings)
-        tempDT <- merge(tempDT, umapDT, by="cID")
-      }
-
-    }
-
-      print("saving DimRedux")
-      save.path <- paste(save.path, "/", nameID, "_DimReduxComps.csv", sep="")
-      write.csv(tempDT, file = save.path, row.names=TRUE, col.names = TRUE)
-
-
-}
-
-
-
-
-
-
 
 #this is a modified version of the AddModuleScore
 #returnScore = F/T controls the output.
@@ -156,17 +104,20 @@ AddModuleScore_SERIII <- function(
   genes.scores.use <- as.data.frame(x = t(x = genes.scores.use))
   rownames(x = genes.scores.use) <- colnames(x = object@assays$RNA@data)
 
+  for (colName in colnames(genes.scores.use)) {
+    object[[colName]] <- genes.scores.use[colnames(object), colName]
+  }
+
+  gc(verbose = FALSE)
+
   if(!returnScore){
 
-    for (colName in colnames(genes.scores.use)) {
-      object[[colName]] <- genes.scores.use[colnames(object),colName]
-    }
-
-    gc(verbose = FALSE)
     return(object)
 
   } else {
-    return(genes.scores.use)
+    object@meta.data$cID <- rownames(object@meta.data)
+
+    return(object@meta.data[, c("cID", colnames(genes.scores.use))] )
   }
 
 
@@ -265,8 +216,9 @@ ClassifyCellsCustom_SERIII <- function(Classifier.rds.path = "",
 
 
 
-#name predict_MCE_SERIII was confusing, as MCE is only 1 method inside this function. Future Dev. can add more methods.
-                                 
+
+
+
 predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rds",
                                classification.path = NULL, file.select = NULL,
                                TrainedClassifiers.path = "../PBMC3k/data",
@@ -274,7 +226,7 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
                                Garnett.path = "./data/Garnett/pbmc_classification.txt", MCEClassify=T,
                                ModuleScoreGeneListClassify=F, ModuleScoreGeneLists=NULL,
                                RhesusConvDavid.path = "./data/Rhesus/David6.8_ConvertedRhesus_ENSMMUG.txt",
-                               RhesusConvDavid = F, ENSMB.tag="ENSMM", yhat.save.path = NA){
+                               RhesusConvDavid = F, ENSMB.tag="ENSMM", yhat.save.path = NA, cleanName=T){
 
 
   if(is.null(ProcSERobj.path)){
@@ -309,11 +261,14 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
 
       print(basename(SERObj.path))
       tempSER <- readRDS(SERObj.path)
+      #tempSER <- SeuratObjs
 
 
 
       tempName <- basename(gsub("_", "", gsub("-", "_", gsub("\\.", "", gsub("_SeuratObj.rds_proc.rds", "", SERObj.path)))))
 
+
+      # ModuleScoreGeneLists <- CTL_Immune_GeneList(QuickGO.path="/Volumes/Maggie/Work/OHSU/Eisa/R/scRNASeq/data/QuickGO")
 
 
 
@@ -322,31 +277,37 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
       if(ModuleScoreGeneListClassify){
 
         print("Starting Seurat's AddModule Scoring for GeneSets")
-        tempLSScores <- list()
+        #tempLSScores <- list()
+        ClassifiersLS$SeuratGeneScore[[tempName]] <- list()
 
 
         for(GeneList in names(ModuleScoreGeneLists)){
-
+          # GeneList = names(ModuleScoreGeneLists)[1]
           print(GeneList)
 
 
 
           if(length(ModuleScoreGeneLists[[GeneList]])>0){
-            ClassifiersLS$SeuratGeneScore[[GeneList]] <- AddModuleScore_SERIII(object=tempSER,
+            ClassifiersLS$SeuratGeneScore[[tempName]][[GeneList]] <- AddModuleScore_SERIII(object=tempSER,
                                                                                genes.list = list(ModuleScoreGeneLists[[GeneList]]),
                                                                                genes.pool = NULL,
                                                                                n.bin = 25,
-                                                                               seed.use = 1,
+                                                                               seed.use = 123,
                                                                                ctrl.size = 100,
                                                                                enrich.name = GeneList,
                                                                                random.seed = 1, returnScore = T)
           } else {
+            warning("length of gene list is <= 0 ")
 
           }
         }
 
+
+
         #Seurate gene score (SGS)
-        SGS.DF <- as.data.frame(ClassifiersLS$SeuratGeneScore)
+        SGS.DF <- as.data.frame(ClassifiersLS$SeuratGeneScore[[tempName]])
+
+        ClassifiersLS$SeuratGeneScore[[tempName]]$SGS.DF <- SGS.DF#ClassifiersLS$SeuratGeneScore
 
         if(!is.na(yhat.save.path)){
 
@@ -386,7 +347,7 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
 
           #for now because I did that with the training set, when new training is done,
           #I will not do this, as its just fine to keep the dash and avoid dupes
-          colnames(X.SerObj.temp) <- gsub("-", "", colnames(X.SerObj.temp))
+          if(cleanName) colnames(X.SerObj.temp) <- gsub("-", "", colnames(X.SerObj.temp))
 
 
           ClassifiersLS$MCEyhat$CD8T[[tempName]]  <- list(MCE=ClassifyCellsCustom_SERIII(
@@ -574,11 +535,21 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
         if(!is.na(yhat.save.path)){
 
           yhat.s.path <- paste(yhat.save.path, "/", basename(SERObj.path), "_MCEmeta.csv", sep="")
-          print(yhat.s.path)
-          write.csv(Classificatio.meta.data, file = yhat.s.path, row.names=TRUE, col.names = T)
+          if(file.exists(yhat.s.path)){
+            print(yhat.s.path); print("already exists")
+          } else {
+            write.csv(Classificatio.meta.data, file = yhat.s.path, row.names=TRUE, col.names = T)
+
+          }
 
           yhat.s.path <- paste(yhat.save.path, "/", basename(SERObj.path), "_MCEyhat.csv", sep="")
-          write.csv(yhat.Combo, file = yhat.s.path, row.names=TRUE, col.names = T)
+
+          if(file.exists(yhat.s.path)){
+            print(yhat.s.path); print("already exists")
+          } else {
+            write.csv(yhat.Combo, file = yhat.s.path, row.names=TRUE, col.names = T)
+
+          }
 
         }
 
@@ -601,5 +572,3 @@ predict_SERIII <- function(ProcSERobj.path = NULL, PatternOfProcSERobj="_proc.rd
 
 
 }
-
-
