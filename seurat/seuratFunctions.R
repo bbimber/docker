@@ -111,8 +111,10 @@ markStepRun <- function(seuratObj, name, saveFile = NULL) {
   return(seuratObj)
 }
 
-mergeSeuratObjs <- function(seuratObjs, data, alignData = T, MaxCCAspaceDim = 20, MaxPCs2Weight = 20){
-  for (exptNum in names(data)) {
+mergeSeuratObjs <- function(seuratObjs, data = NULL, alignData = T, MaxCCAspaceDim = 20, MaxPCs2Weight = 20){
+  nameList <- ifelse(is.null(data), yes = names(seuratObjs), no = names(data))
+  
+  for (exptNum in nameList) {
     print(paste0('adding expt: ', exptNum))
     prefix <- paste0(exptNum)
     so <- seuratObjs[[exptNum]]
@@ -146,13 +148,16 @@ mergeSeuratObjs <- function(seuratObjs, data, alignData = T, MaxCCAspaceDim = 20
   seuratObj <- NULL
   if (alignData && length(seuratObjs) > 1) {
     # dims here means : Which dimensions to use from the CCA to specify the neighbor search space
-    anchors <- FindIntegrationAnchors(object.list = seuratObjs, dims = 1:MaxCCAspaceDim, scale = T, verbose = T)
+    anchors <- FindIntegrationAnchors(object.list = seuratObjs, dims = 1:MaxCCAspaceDim, scale = T, verbose = F)
     # dims here means : #Number of PCs to use in the weighting procedure
-    seuratObj <- IntegrateData(anchorset = anchors, dims = 1:MaxPCs2Weight) 
+    seuratObj <- IntegrateData(anchorset = anchors, dims = 1:MaxPCs2Weight, verbose = F) 
     DefaultAssay(seuratObj) <- "integrated"
+    
+    # This will prevent repeating this step downstream
+    seuratObj <- markStepRun(seuratObj, 'NormalizeData')
   }
   else {
-    for (exptNum in names(data)) {
+    for (exptNum in nameList) {
       if (is.null(seuratObj)) {
         seuratObj <- seuratObjs[[exptNum]]
       } else {
@@ -247,12 +252,15 @@ processSeurat1 <- function(seuratObj, saveFile = NULL, doCellCycle = T, doCellFi
   return(seuratObj)
 }
 
-downloadAndAppendTcrClonotypes <- function(seuratObject, outPath = '.'){
+downloadAndAppendTcrClonotypes <- function(seuratObject, outPath = '.', dropExisting = T){
   if (is.null(seuratObject[['BarcodePrefix']])){
     stop('Seurat object lacks BarcodePrefix column')
   }
   
+  i <- 0
   for (barcodePrefix in unique(unique(unlist(seuratObject[['BarcodePrefix']])))) {
+    i <- i + 1
+    
     print(paste0('Adding TCR clonotypes for prefix: ', barcodePrefix))
     
     vloupeId <- findMatchedVloupe(barcodePrefix)
@@ -261,18 +269,20 @@ downloadAndAppendTcrClonotypes <- function(seuratObject, outPath = '.'){
     }
     
     clonotypeFile <- file.path(outPath, paste0(barcodePrefix, '_clonotypes.csv'))
-    downloadCellRangerClonotypes(vLoupeId = vloupeId, outFile = clonotypeFile, overwrite = T)
+    
+    doDropExisting <- i == 1 && dropExisting
+    downloadCellRangerClonotypes(vLoupeId = vloupeId, outFile = clonotypeFile)
     if (!file.exists(clonotypeFile)){
       stop(paste0('Unable to download clonotype file for prefix: ', barcodePrefix))
     }
     
-    seuratObject <- appendTcrClonotypes(seuratObject, clonotypeFile, barcodePrefix)
+    seuratObject <- appendTcrClonotypes(seuratObject, clonotypeFile, barcodePrefix = barcodePrefix, dropExisting = doDropExisting)
   }
   
   return(seuratObject)
 }
 
-appendTcrClonotypes <- function(seuratObject = NA, clonotypeFile = NA, barcodePrefix = NULL){
+appendTcrClonotypes <- function(seuratObject = NA, clonotypeFile = NA, barcodePrefix = NULL, dropExisting = F){
   tcr <- processAndAggregateTcrClonotypes(clonotypeFile)
   
   if (!is.null(barcodePrefix)){
@@ -304,12 +314,19 @@ appendTcrClonotypes <- function(seuratObject = NA, clonotypeFile = NA, barcodePr
   for (colName in colnames(tcr)[colnames(tcr) != 'barcode']) {
     toAdd <- as.character(merged[[colName]])
     names(toAdd) <- merged[['barcode']]
-    
-    if (!(colName %in% names(seuratObject@meta.data))) {
-      seuratObject[[colName]] <- c(NA)
+
+    if ((colName %in% names(seuratObject@meta.data)) && dropExisting) {
+      seuratObject@meta.data[colName] <- NULL
     }
     
-    toUpdate <- as.character(seuratObject[[colName]])
+    if (!(colName %in% names(seuratObject@meta.data))) {
+      toUpdate <- rep(NA, ncol(seuratObject))
+    } else {
+      toUpdate <- unlist(seuratObject[[colName]])
+    }
+    
+    names(toUpdate) <- colnames(seuratObject)
+    
     toUpdate[datasetSelect] <- toAdd
     seuratObject[[colName]] <- as.factor(toUpdate)
   }
@@ -422,11 +439,11 @@ processAndAggregateTcrClonotypes <- function(clonotypeFile){
     colNameOpt='rname'
   )
   
-  labelDf$LabelCol <- coalesce(labelDf$displayname, labelDf$clonename)
+  labelDf$LabelCol <- coalesce(as.character(labelDf$displayname), as.character(labelDf$clonename))
 
   labelDf <- labelDf %>% 
     group_by(chain, cdr3) %>% 
-    summarize(CloneName = paste(sort(unique(LabelCol)), collapse = ","))
+    summarize(CloneName = paste0(sort(unique(LabelCol)), collapse = ","))
   
   tcr <- merge(tcr, labelDf, by.x = c('chain', 'cdr3'), by.y = c('chain', 'cdr3'), all.x = TRUE, all.y = FALSE)
 
@@ -457,14 +474,14 @@ processAndAggregateTcrClonotypes <- function(clonotypeFile){
     TRDV = paste(sort(unique(as.character(TRDV))), collapse = ","),
     TRGV = paste(sort(unique(as.character(TRGV))), collapse = ","),
     
-    CloneNames = paste(sort(unique(CloneName)), collapse = ",")  #this is imprecise b/c we count a hit if we match any chain, but this is probably what we often want
+    CloneNames = paste0(sort(unique(CloneName)), collapse = ",")  #this is imprecise b/c we count a hit if we match any chain, but this is probably what we often want
   )
   
   # Note: we should attempt to produce a more specfic call, assuming we have data from multiple chains
   # The intent of this was to allow a A- or B-only hit to produce a call, but if we have both A/B, take their intersect.
 
-  tcr$CloneNames <- sapply(strsplit(as.character(tcr$CloneNames), ",", fixed = TRUE), function(x) paste(naturalsort(unique(x)), collapse = ","))
-  tcr$CloneNames[tcr$CloneNames == 'NA'] <- NA
+  tcr$CloneNames <- sapply(strsplit(as.character(tcr$CloneNames), ",", fixed = TRUE), function(x) paste0(naturalsort(unique(x)), collapse = ","))
+  tcr$CloneNames[tcr$CloneNames == ''] <- NA
 
   tcr$barcode <- as.factor(tcr$barcode)
   for (colName in colnames(tcr)[colnames(tcr) != 'barcode']) {
