@@ -631,29 +631,39 @@ findMarkers <- function(seuratObj, resolutionToUse, outFile, saveFileMarkers = N
     seuratObj.markers <- readRDS(saveFileMarkers)
   } else {
     seuratObj.markers <- NA
-    for (test in testsToUse) {    
+    for (test in testsToUse) {
       print(paste0('Running using test: ', test))
-      tMarkers <- FindAllMarkers(object = seuratObj, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25, verbose = F, test.use = test)
-      if (nrow(tMarkers) == 0) {
-        print('No genes returned, skipping')
-      } else {
-        tMarkers$test <- c(test)
-        tMarkers$cluster <- as.character(tMarkers$cluster)
-        
-        toBind <- data.frame(test = tMarkers$test, 
-                             cluster = tMarkers$cluster, 
-                             gene = tMarkers$gene,
-                             avg_logFC = tMarkers$avg_logFC,
-                             pct.1 = tMarkers$pct.1,
-                             pct.2 = tMarkers$pct.2,
-                             p_val_adj = tMarkers$p_val_adj
-                           )
-        if (all(is.na(seuratObj.markers))) {
-          seuratObj.markers <- toBind
+      tryCatch({
+        tMarkers <- FindAllMarkers(object = seuratObj, only.pos = onlypos, min.pct = 0.25, logfc.threshold = 0.25, verbose = F, test.use = test)
+        if (nrow(tMarkers) == 0) {
+          print('No genes returned, skipping')
         } else {
-          seuratObj.markers <- rbind(seuratObj.markers, toBind)
+          tMarkers$test <- c(test)
+          tMarkers$cluster <- as.character(tMarkers$cluster)
+          
+          toBind <- data.frame(test = tMarkers$test,
+                               cluster = tMarkers$cluster,
+                               gene = tMarkers$gene,
+                               avg_logFC = tMarkers$avg_logFC,
+                               pct.1 = tMarkers$pct.1,
+                               pct.2 = tMarkers$pct.2,
+                               p_val_adj = tMarkers$p_val_adj
+          )
+          if (all(is.na(seuratObj.markers))) {
+            seuratObj.markers <- toBind
+          } else {
+            seuratObj.markers <- rbind(seuratObj.markers, toBind)
+          }
         }
-      }
+      }, error = function(e){
+        print(paste0('Error running test: ', test))
+        print(e)
+      })
+    }
+    
+    if (is.na(seuratObj.markers)) {
+      print('All tests failed, no markers returned')
+      return()  
     }
     
     if (!('cluster' %in% names(seuratObj.markers))) {
