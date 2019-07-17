@@ -837,6 +837,9 @@ generateSummaryForExpectedBarcodes <- function(dt, whitelistFile, outputFile, ba
   df <- rbind(df, data.frame(Category = categoryName, MetricName = "SeuratNonNegative", Value = sum(dt$Seurat)))
   df <- rbind(df, data.frame(Category = categoryName, MetricName = "MultiSeqNonNegative", Value = sum(dt$MultiSeq)))
   
+  #All HTOs:
+  df <- rbind(df, data.frame(Category = categoryName, MetricName = "UniqueHtos", Value = paste0(unique(as.character(dt$HTO)), collapse = ",")));
+  
   df$Value[is.na(df$Value)] <- 0
   
   write.table(df, file = outputFile, quote = F, row.names = F, sep = '\t')
