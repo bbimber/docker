@@ -112,7 +112,12 @@ markStepRun <- function(seuratObj, name, saveFile = NULL) {
 }
 
 mergeSeuratObjs <- function(seuratObjs, data = NULL, alignData = T, MaxCCAspaceDim = 20, MaxPCs2Weight = 20){
-  nameList <- ifelse(is.null(data), yes = names(seuratObjs), no = names(data))
+  nameList <- NULL
+  if (is.null(data)){
+    nameList <- names(seuratObjs)
+  } else {
+    nameList <- names(data)
+  }
   
   for (exptNum in nameList) {
     print(paste0('adding expt: ', exptNum))
@@ -120,6 +125,7 @@ mergeSeuratObjs <- function(seuratObjs, data = NULL, alignData = T, MaxCCAspaceD
     so <- seuratObjs[[exptNum]]
     
     if (!('BarcodePrefix' %in% names(so@meta.data))) {
+      print(paste0('Adding barcode prefix: ', prefix))
       so <- RenameCells(object = so, add.cell.id = prefix)
       so[['BarcodePrefix']] <- c(prefix)
     } else {
@@ -147,6 +153,8 @@ mergeSeuratObjs <- function(seuratObjs, data = NULL, alignData = T, MaxCCAspaceD
   
   seuratObj <- NULL
   if (alignData && length(seuratObjs) > 1) {
+    CheckDuplicatedCellNames(seuratObjs)
+    
     # dims here means : Which dimensions to use from the CCA to specify the neighbor search space
     anchors <- FindIntegrationAnchors(object.list = seuratObjs, dims = 1:MaxCCAspaceDim, scale = T, verbose = F)
     # dims here means : #Number of PCs to use in the weighting procedure
@@ -173,6 +181,25 @@ mergeSeuratObjs <- function(seuratObjs, data = NULL, alignData = T, MaxCCAspaceD
   }
   
   return(seuratObj)  
+}
+
+CheckDuplicatedCellNames <- function(object.list, stop = TRUE){
+  cell.names <- unlist(
+    x = sapply(
+      X = 1:length(x = object.list),
+      FUN = function(x) Cells(object.list[[x]])
+    )
+  )
+  
+  dups <- duplicated(x = cell.names)
+  if (any(dups)) {
+    if (stop){
+      stop(paste0('There were duplicated cell names: ',  paste0(head(unique(cell.names[dups])), collapse = ',')))
+    } else {
+      print('There were duplicated cell names')
+      print(head(unique(cell.names[dups])))
+    }
+  }
 }
 
 processSeurat1 <- function(seuratObj, saveFile = NULL, doCellCycle = T, doCellFilter = F,
