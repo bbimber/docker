@@ -10,6 +10,9 @@ library(cowplot)
 
 labkey.setDefaults(baseUrl = "https://prime-seq.ohsu.edu")
 
+#2gb
+options(future.globals.maxSize = 2097152000)
+
 readAndFilter10xData <- function(dataDir, datasetName) {
   seuratRawData <- Read10X(data.dir = dataDir)
   seuratRawData <- performEmptyDropletFiltering(seuratRawData)
